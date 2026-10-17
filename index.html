@@ -66,6 +66,11 @@ svg text{fill:var(--muted);font-size:11px;font-family:inherit}
 
 /* ===== Dashboard specific ===== */
 .sub{color:var(--muted);margin:2px 0 6px}
+.btn.danger{background:var(--bad);color:#fff}
+.confirm{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:8px;text-align:left}
+.confirm p{margin:0 0 10px}
+.center{text-align:center}
+.plain h4{margin:12px 0 2px;font-size:14px}
 .game h2{font-size:20px;margin:0}
 .game .blurb{color:var(--muted);font-size:14px;margin:2px 0 0}
 .ghead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
@@ -91,6 +96,13 @@ svg text{fill:var(--muted);font-size:11px;font-family:inherit}
   <div id="games"></div>
 
   <p class="small muted" style="margin-top:20px">Scores are saved only in this browser, on this device. Clearing your browser data erases them.</p>
+  <div class="center" id="resetWrap">
+    <button class="linkbtn" id="resetBtn">Reset all scores</button>
+    <div class="confirm hidden" id="resetConfirm">
+      <p>Erase your scores for every game and start fresh? This can't be undone. To reset just one game, use the link on that game's page.</p>
+      <div class="row"><button class="btn ghost" id="resetNo">Cancel</button><button class="btn danger" id="resetYes">Erase all</button></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -190,44 +202,67 @@ function card(g){
         <div class="stat"><b>${st.n}</b><span>Rounds</span></div></div>
       ${chip}
       <div class="trend">${spark(g, st.vals)}<span>${st.trend?TREND[st.trend]:(st.n<2?"Play again to see a trend":"Trend shows after 4 rounds")}</span></div>
-      <div class="foot">${g.metric}${g.better!=="higher"?", lower is better":", higher is better"}.${g.normLo!=null?` Typical adults: ${fmt(g,g.normLo)} to ${fmt(g,g.normHi)}.`:""}${left?` ${left} more round${left>1?"s":""} for a settled score.`:""}</div>`;
+      <div class="foot">${g.metric}${g.better!=="higher"?", lower is better":", higher is better"}.${g.normLo!=null?` Typical adults: ${fmt(g,g.normLo)} to ${fmt(g,g.normHi)}.`:""}${left?` ${left} more round${left>1?"s":""} for a settled score.`:(st.settled==null?` Open the game once to calculate your settled score.`:"")}</div>`;
   }
   return `<div class="card game"><div class="ghead"><div><h2>${g.title}</h2><div class="blurb">${[g.blurb,g.roundTime].filter(Boolean).join(" &middot; ")}</div></div>
     <a class="play" href="${g.path}">Play</a></div>${body}</div>`;
 }
 
+function rel(g, v){ // 1 = at the good edge of the typical range, 0 = at the poor edge
+  if(v==null||g.normLo==null) return null;
+  const f=(v-g.normLo)/(g.normHi-g.normLo); return g.better!=="higher" ? 1-f : f;
+}
 function summary(games){
   const played=games.filter(g=>stats(g).n>0), N=games.length, p=[];
   p.push(`<h3>What this means, in plain English</h3>`);
   if(!played.length){
-    p.push(`<p>You haven't played yet. Each game takes about 2 minutes and tests one gut sense against what researchers have measured in adults. Start with any game below.</p>`);
+    p.push(`<p>You haven't played yet. Each game takes about 2 minutes and tests one gut sense against what researchers have measured in adults. Play 5 rounds of a game to get a settled score and a full explanation of what it means.</p>`);
     return p.join("");
   }
-  p.push(`<p>You've played ${played.length} of ${N} game${N>1?"s":""}.</p>`);
-  const tally={better:0,typical:0,worse:0}; let early=0; const lines=[];
+  const settled=played.filter(g=>stats(g).settled!=null);
+  const unsettled=games.filter(g=>stats(g).settled==null);
+  if(settled.length===N) p.push(`<p><b>Your full gut profile.</b> Every game has a settled score, so this summary is as solid as this setup allows.</p>`);
+  else p.push(`<p>You've played ${played.length} of ${N} game${N>1?"s":""}. ${settled.length} ha${settled.length===1?"s":"ve"} a settled score.</p>`);
   for(const g of played){
-    const st=stats(g), s=standing(g,st.main); if(st.settled==null) early++;
-    if(s) tally[s]++;
-    const tag = `${fmt(g,st.main)}${st.settled!=null?", settled":", early read"}`;
-    if(!s) { lines.push(`<b>${g.title}:</b> ${tag}. No adult norm to compare with yet.`); continue; }
-    const where = s==="better" ? "better than most adults" : s==="typical" ? "in the typical adult range" : "below the typical adult range";
-    lines.push(`<b>${g.title}:</b> your ${g.skill} is ${where} (${tag}).`);
+    const st=stats(g);
+    if(st.settled!=null){
+      const s0=standing(g,st.settled);
+      const txt = g.data.summary || `Settled score ${fmt(g,st.settled)}${s0?`, ${s0==="better"?"better than most adults":s0==="typical"?"in the typical adult range":"below the typical adult range"}`:""}. Open the game for the full explanation.`;
+      p.push(`<h4>${g.title}</h4><p>${txt}</p>`);
+    } else {
+      const s=standing(g,st.main), left=Math.max(0,5-st.n);
+      const where = s==="better" ? "better than most adults" : s==="typical" ? "in the typical adult range" : s==="worse" ? "below the typical adult range" : null;
+      p.push(`<h4>${g.title} (early read)</h4><p>${where?`So far your ${g.skill} looks ${where} (${fmt(g,st.main)}). `:`So far: ${fmt(g,st.main)}. `}${left?`Play ${left} more round${left>1?"s":""} for a settled score.`:`Open ${g.title} once to calculate your settled score.`}</p>`);
+    }
   }
-  p.push(`<p>${lines.join("<br>")}</p>`);
-  const parts=[]; if(tally.better) parts.push(`better than typical on ${tally.better}`); if(tally.typical) parts.push(`typical on ${tally.typical}`); if(tally.worse) parts.push(`below typical on ${tally.worse}`);
-  const rated=tally.better+tally.typical+tally.worse;
-  if(parts.length) p.push(`<p><b>Overall:</b> of ${rated} game${rated>1?"s":""} with adult norms, your gut is ${parts.join(", ")}.</p>`);
-  if(early) p.push(`<p>${early===played.length?"All":"Some"} of these are early reads. Each game needs 5 rounds before its score settles. Single rounds swing a lot from luck.</p>`);
-  if(played.length>=2) p.push(`<p>These games measure different senses. Some researchers think the brain shares one system for judging "how much" across number, time, and space. That idea is still debated, so don't treat your scores as one combined ability.</p>`);
+  const ranked=settled.map(g=>({g, r:rel(g,stats(g).settled)})).filter(x=>x.r!=null).sort((a,b)=>b.r-a.r);
+  if(ranked.length>=2){
+    const top=ranked[0], bot=ranked[ranked.length-1];
+    if(top.r-bot.r>0.15) p.push(`<h4>Strongest and weakest</h4><p>Compared with typical adults, your strongest gut sense is your ${top.g.skill} (${top.g.title}) and your weakest is your ${bot.g.skill} (${bot.g.title}). This compares where you sit within each game's adult range, so treat it as rough.</p>`);
+    else p.push(`<h4>Strongest and weakest</h4><p>Your settled scores sit at about the same spot within each game's adult range. No gut sense stands out as clearly stronger.</p>`);
+  }
+  if(unsettled.length && settled.length) p.push(`<p>To complete your profile: ${unsettled.map(g=>{const n=stats(g).n;return n>=5?`open ${g.title} once`:`${5-n} more round${5-n>1?"s":""} of ${g.title}`;}).join(", ")}.</p>`);
+  if(played.length>=2) p.push(`<p>These games measure different senses. Some researchers have proposed that the brain shares one system for judging "how much" across number, time, and space (Walsh, 2003, <i>Trends in Cognitive Sciences</i>). That is a proposal, not an established fact, so don't treat your scores as one combined ability. Each game's page lists its sources.</p>`);
   p.push(`<p>The adult ranges come from published studies, but those used lab screens and different setups. Treat the comparisons as rough.</p>`);
   return p.join("");
 }
+
+/* reset all */
+(function(){
+  const b=document.getElementById("resetBtn"), c=document.getElementById("resetConfirm");
+  b.addEventListener("click",()=>{ c.classList.remove("hidden"); b.classList.add("hidden"); });
+  document.getElementById("resetNo").addEventListener("click",()=>{ c.classList.add("hidden"); b.classList.remove("hidden"); });
+  document.getElementById("resetYes").addEventListener("click",()=>{
+    try{ const ks=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith("gut.")&&k!==THEME_KEY) ks.push(k); } ks.forEach(k=>localStorage.removeItem(k)); }catch(e){}
+    c.classList.add("hidden"); b.classList.remove("hidden"); render(); });
+})();
 
 function render(){
   const games=allGames();
   document.getElementById("count").textContent = `${games.length} game${games.length>1?"s":""} · about ${games.length*2} minutes to play them all`;
   document.getElementById("summary").innerHTML = summary(games);
   document.getElementById("games").innerHTML = games.map(card).join("");
+  document.getElementById("resetWrap").classList.toggle("hidden", !games.some(g=>stats(g).n>0));
 }
 render();
 window.addEventListener("pageshow", render);
